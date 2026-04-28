@@ -1231,3 +1231,16 @@ h6 {
   font-size: 13px;
   color: #012970;
 }
+/* Fix sidebar overlap */
+#main,
+#footer {
+  margin-left: 300px !important;
+}
+
+@media (max-width: 1199px) {
+
+  #main,
+  #footer {
+    margin-left: 300px !important;
+  }
+}
