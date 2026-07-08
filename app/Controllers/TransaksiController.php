@@ -17,7 +17,7 @@ class TransaksiController extends BaseController
 
     public function __construct()
     {
-        helper(['number', 'form']);
+        helper(['number', 'form', 'transaksi']);
         $this->cart = service('cart');
         $this->transactionModel = new TransactionModel();
         $this->transactionDetailModel = new TransactionDetailModel(); 
@@ -99,14 +99,53 @@ class TransaksiController extends BaseController
     }
 
     public function checkout()
-    {  
+    {
+        $total     = $this->cart->total();
+        $kuponCode = $this->request->getGet('kupon_code');
+
+        $diskonKupon = hitung_diskon_kupon($total, $kuponCode);
+        $ppn         = hitung_ppn($total);
+        $biayaAdmin  = hitung_biaya_admin($total);
+
         $data = [
-            'items' => $this->cart->contents(),
-            'total' => $this->cart->total(), 
+            'items'          => $this->cart->contents(),
+            'total'          => $total,
+            'kupon_code'     => $kuponCode,
+            'diskon_kupon'   => $diskonKupon,
+            'ppn'            => $ppn,
+            'biaya_admin'    => $biayaAdmin,
+            'persen_admin'   => get_persentase_biaya_admin($total),
+            'persen_kupon'   => get_persentase_kupon($kuponCode),
         ];
 
         return view('v_checkout', $data);
     }
+
+    /**
+     * Endpoint AJAX untuk menghitung ulang rincian biaya (PPN, biaya admin,
+     * diskon kupon) setiap kali pelanggan mengubah kode kupon di halaman checkout.
+     */
+    public function hitungRincian()
+    {
+        $total     = $this->cart->total();
+        $kuponCode = $this->request->getGet('kupon_code');
+
+        $diskonKupon = hitung_diskon_kupon($total, $kuponCode);
+        $ppn         = hitung_ppn($total);
+        $biayaAdmin  = hitung_biaya_admin($total);
+        $kuponValid  = $diskonKupon > 0 || strtoupper(trim((string) $kuponCode)) === '';
+
+        return $this->response->setJSON([
+            'total'         => $total,
+            'diskon_kupon'  => $diskonKupon,
+            'persen_kupon'  => get_persentase_kupon($kuponCode),
+            'ppn'           => $ppn,
+            'biaya_admin'   => $biayaAdmin,
+            'persen_admin'  => get_persentase_biaya_admin($total),
+            'kupon_valid'   => $kuponValid,
+        ]);
+    }
+
     public function destinations()
     {
         $search = $this->request->getGet('q'); 
@@ -169,14 +208,29 @@ class TransaksiController extends BaseController
             $subtotal += $item['qty'] * $item['price'];
         }
 
-        $ongkir = (int) $this->request->getPost('ongkir');
+        $ongkir     = (int) $this->request->getPost('ongkir');
+        $kuponCode  = $this->request->getPost('kupon_code');
+
+        // Hitung komponen tambahan (dihitung dari total harga pembelian, tidak termasuk ongkir)
+        $diskonKupon = hitung_diskon_kupon($subtotal, $kuponCode);
+        $ppn         = hitung_ppn($subtotal);
+        $biayaAdmin  = hitung_biaya_admin($subtotal);
+
+        // Simpan kode kupon hanya jika valid (diskon > 0), selain itu null
+        $kuponCodeTersimpan = $diskonKupon > 0 ? strtoupper(trim($kuponCode)) : null;
+
+        $totalHarga = $subtotal - $diskonKupon + $ppn + $biayaAdmin + $ongkir;
 
         $transaction = [
-            'username'    => $this->request->getPost('username'),
-            'alamat'      => $this->request->getPost('alamat'),
-            'ongkir'      => $ongkir,
-            'total_harga' => $subtotal + $ongkir,
-            'status'      => 0, 
+            'username'     => $this->request->getPost('username'),
+            'alamat'       => $this->request->getPost('alamat'),
+            'ongkir'       => $ongkir,
+            'total_harga'  => $totalHarga,
+            'status'       => 0,
+            'ppn'          => $ppn,
+            'biaya_admin'  => $biayaAdmin,
+            'kupon_code'   => $kuponCodeTersimpan,
+            'diskon_kupon' => $diskonKupon,
         ];
 
         // insert transaction
@@ -208,6 +262,7 @@ class TransaksiController extends BaseController
         $this->cart->destroy();
         return redirect()->to(base_url());
     }
+
     public function history()
     {
         $username = session()->get('username'); 

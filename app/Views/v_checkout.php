@@ -39,6 +39,17 @@
                 'readonly' => true]) ?>
         </div>
         <div class="col-12">
+            <?= form_label('Kode Kupon', 'kupon_code', ['class' => 'form-label']) ?>
+            <?= form_input([
+                'name'        => 'kupon_code',
+                'id'          => 'kupon_code',
+                'class'       => 'form-control',
+                'placeholder' => 'Contoh: HEMAT20',
+                'value'       => old('kupon_code', $kupon_code ?? '')]) ?>
+            <small class="text-muted">Tersedia: HEMAT20, HEMAT30, MEMBER25</small>
+            <div id="kupon-feedback" class="mt-1"></div>
+        </div>
+        <div class="col-12">
             <?= form_submit(
                 'submit',
                 'Buat Pesanan',
@@ -77,10 +88,30 @@
                     <td>Subtotal</td>
                     <td><?= number_to_currency($total, 'IDR') ?></td>
                 </tr>
+                <tr class="text-danger">
+                    <td colspan="2"></td>
+                    <td>Diskon Kupon <span id="persen-kupon-label"><?= $persen_kupon > 0 ? '(' . $persen_kupon . '%)' : '' ?></span></td>
+                    <td>-<span id="diskon-kupon"><?= number_to_currency($diskon_kupon, 'IDR') ?></span></td>
+                </tr>
                 <tr>
                     <td colspan="2"></td>
-                    <td>Total</td>
-                    <td><span id="total"><?= number_to_currency($total, 'IDR') ?></span></td>
+                    <td>PPN (12%)</td>
+                    <td><span id="ppn"><?= number_to_currency($ppn, 'IDR') ?></span></td>
+                </tr>
+                <tr>
+                    <td colspan="2"></td>
+                    <td>Biaya Admin <span id="persen-admin-label">(<?= $persen_admin ?>%)</span></td>
+                    <td><span id="biaya-admin"><?= number_to_currency($biaya_admin, 'IDR') ?></span></td>
+                </tr>
+                <tr>
+                    <td colspan="2"></td>
+                    <td>Subtotal (+PPN+Admin-Kupon)</td>
+                    <td><span id="subtotal-akhir"><?= number_to_currency($total - $diskon_kupon + $ppn + $biaya_admin, 'IDR') ?></span></td>
+                </tr>
+                <tr>
+                    <td colspan="2"></td>
+                    <td>Grand Total (+ Ongkir)</td>
+                    <td><span id="total"><?= number_to_currency($total - $diskon_kupon + $ppn + $biaya_admin, 'IDR') ?></span></td>
                 </tr>
             </tbody>
         </table>
@@ -92,15 +123,61 @@
 $(document).ready(function() {
     let ongkir = 0;
     let subtotal = <?= $total ?>;
+    let diskonKupon = <?= $diskon_kupon ?>;
+    let ppn = <?= $ppn ?>;
+    let biayaAdmin = <?= $biaya_admin ?>;
+
     hitungTotal();
 
+    function formatRupiah(angka) {
+        return `IDR ${Math.round(angka).toLocaleString('id-ID')}`;
+    }
+
     function hitungTotal() {
-        let total = subtotal + ongkir;
+        let subtotalAkhir = subtotal - diskonKupon + ppn + biayaAdmin;
+        let total = subtotalAkhir + ongkir;
 
         $("#ongkir").val(ongkir);
-        $("#total").text(`IDR ${total.toLocaleString('id-ID')}`);
+        $("#diskon-kupon").text(formatRupiah(diskonKupon));
+        $("#ppn").text(formatRupiah(ppn));
+        $("#biaya-admin").text(formatRupiah(biayaAdmin));
+        $("#subtotal-akhir").text(formatRupiah(subtotalAkhir));
+        $("#total").text(formatRupiah(total));
         $("#total_harga").val(total);
-    }   
+    }
+
+    let kuponTimer;
+    $("#kupon_code").on('keyup', function() {
+        clearTimeout(kuponTimer);
+        let kode = $(this).val();
+
+        kuponTimer = setTimeout(function() {
+            $.ajax({
+                url: "<?= site_url('ajax/rincian') ?>",
+                dataType: "json",
+                data: { kupon_code: kode },
+                success: function(data) {
+                    diskonKupon = parseFloat(data.diskon_kupon);
+                    ppn = parseFloat(data.ppn);
+                    biayaAdmin = parseFloat(data.biaya_admin);
+
+                    if (data.persen_kupon > 0) {
+                        $("#persen-kupon-label").text(`(${data.persen_kupon}%)`);
+                        $("#kupon-feedback").html('<small class="text-success">Kupon valid</small>');
+                    } else if (kode.trim() === '') {
+                        $("#persen-kupon-label").text('');
+                        $("#kupon-feedback").html('');
+                    } else {
+                        $("#persen-kupon-label").text('');
+                        $("#kupon-feedback").html('<small class="text-danger">Kode kupon tidak valid</small>');
+                    }
+
+                    $("#persen-admin-label").text(`(${data.persen_admin}%)`);
+                    hitungTotal();
+                }
+            });
+        }, 400);
+    });
 
 	$('#kelurahan').select2({
 	    placeholder: 'Cari daerah tujuan',
